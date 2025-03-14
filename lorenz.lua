@@ -4,7 +4,8 @@
 -- E2 adjust second parameter (rho/b)
 -- E3 adjust third parameter (beta/c)
 --
--- K1 toggle between Lorenz and Rössler attractors
+-- K1 cycle forward between Lorenz, Rössler, Sprott-Linz F, and Halvorsen attractors
+-- K2+K3 cycle backward between attractors
 -- K2+E2 adjust simulation speed (dt)
 -- K2 reset to default parameters
 -- K3 randomize parameters
@@ -29,13 +30,20 @@ local a = 0.2
 local b = 0.2
 local c = 5.7
 
+-- Sprott-Linz F parameters
+local sprott_a = 0.5
+
+-- Halvorsen parameters
+local halvorsen_a = 1.89
+
 local scale = 1  -- Scale factor for visualization
+local display_scale = 1  -- Display scale that changes per attractor
 local points = {}
 local max_points = 300  -- Increased for longer trails
 local offset_x, offset_y = 64, 32  -- Center of the screen
 local lorentz_metro
 local key2_down = false
-local current_attractor = "lorenz"  -- Can be "lorenz" or "rossler"
+local current_attractor = "lorenz"  -- Can be "lorenz", "rossler", "sprott", or "halvorsen"
 local out1_volts, out2_volts, out3_volts, out4_volts = 0, 0, 0, 0
 
 function init()
@@ -81,7 +89,8 @@ function reset_parameters(randomize)
       x, y, z = 0.1, 0, 0
     end
 	dt = 0.005
-  else -- rossler
+    display_scale = 1  -- Set display scale for Lorenz
+  elseif current_attractor == "rossler" then -- rossler
     if randomize then
       a = math.random(10, 40) / 100
       b = math.random(10, 40) / 100
@@ -99,6 +108,35 @@ function reset_parameters(randomize)
 	  x, y, z = 0.1, 0.1, 0.1
     end
 	dt = 0.05
+    display_scale = 1  -- Set display scale for Rössler
+  elseif current_attractor == "sprott" then -- sprott
+    if randomize then
+      sprott_a = math.random(40, 50) / 100  -- 0.4 to 0.5
+      
+      -- Also randomize initial conditions
+      x = math.random(50) * 0.01         -- 0 to 0.5
+      y = math.random(-25, 25) * 0.01         -- -0.25 to 0.25
+      z = math.random(-25, 25) * 0.01         -- -0.25 to 0.25
+    else
+      sprott_a = 0.5
+      x, y, z = 1, 0, 0
+    end
+    dt = 0.05
+    display_scale = 5.5  -- Set display scale for Sprott
+  else -- halvorsen
+    if randomize then
+      halvorsen_a = math.random(165, 300) / 100  -- 1.65 to 3.0
+      
+      -- Also randomize initial conditions
+      x = math.random(-1000, 1000) * 0.01     -- -10 to 10
+      y = math.random(-1000, 1000) * 0.01     -- -10 to 10
+      z = math.random(-1000, 1000) * 0.01     -- -10 to 10
+    else
+      halvorsen_a = 1.89
+      x, y, z = 0.1, 0, 0
+    end
+    dt = 0.01
+    display_scale = 3.0  -- Set display scale for Halvorsen
   end
   
   points = {}
@@ -114,11 +152,29 @@ function update_attractor()
     x = x + dx * dt
     y = y + dy * dt
     z = z + dz * dt
-  else -- rossler
+  elseif current_attractor == "rossler" then -- rossler
     -- Calculate next point in the Rössler system
     local dx = -y - z
     local dy = x + a * y
     local dz = b + z * (x - c)
+    
+    x = x + dx * dt
+    y = y + dy * dt
+    z = z + dz * dt
+  elseif current_attractor == "sprott" then -- sprott
+    -- Calculate next point in the Sprott-Linz F system
+    local dx = y + z
+    local dy = -x + sprott_a * y
+    local dz = x * x - z
+    
+    x = x + dx * dt
+    y = y + dy * dt
+    z = z + dz * dt
+  else -- halvorsen
+    -- Calculate next point in the Halvorsen system
+    local dx = -halvorsen_a * x - 4 * y - 4 * z - y * y
+    local dy = -halvorsen_a * y - 4 * z - 4 * x - z * z
+    local dz = -halvorsen_a * z - 4 * x - 4 * y - x * x
     
     x = x + dx * dt
     y = y + dy * dt
@@ -130,6 +186,10 @@ function update_attractor()
   x = math.max(math.min(x, max_value), -max_value)
   y = math.max(math.min(y, max_value), -max_value)
   z = math.max(math.min(z, max_value), -max_value)
+
+  if (math.abs(x) == 1000 or math.abs(y) == 1000 or math.abs(z) == 1000) then
+    reset_parameters(true)
+  end
   
   -- Add new point to the list
   table.insert(points, {x = x, y = y, z = z})
@@ -147,12 +207,24 @@ function update_attractor()
     out3_volts = util.clamp(z * 0.1, -5, 5)  -- Z is much larger in Lorenz
     -- Calculate distance from origin (normalized chaos intensity)
     out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.05, 0, 5)
-  else
+  elseif current_attractor == "rossler" then
     -- Rössler has different ranges for each dimension
     out1_volts = util.clamp(x * 0.25, -5, 5)
     out2_volts = util.clamp(y * 0.25, -5, 5)
     out3_volts = util.clamp(z * 0.25, -5, 5)  -- Z is still larger but not as extreme
     out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.1, 0, 5)
+  elseif current_attractor == "sprott" then -- sprott
+    -- Sprott-Linz F has smaller ranges
+    out1_volts = util.clamp(x * 1.0, -5, 5)
+    out2_volts = util.clamp(y * 1.0, -5, 5)
+    out3_volts = util.clamp(z * 1.0, -5, 5)
+    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.5, 0, 5)
+  else -- halvorsen
+    -- Halvorsen has moderate ranges
+    out1_volts = util.clamp(x * 0.5, -5, 5)
+    out2_volts = util.clamp(y * 0.5, -5, 5)
+    out3_volts = util.clamp(z * 0.5, -5, 5)
+    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.25, 0, 5)
   end
   
   crow.output[1].volts = out1_volts
@@ -170,10 +242,10 @@ function redraw()
     local curr = points[i]
     
     -- Project 3D to 2D (simple orthographic projection)
-    local prev_x = prev.x * scale + offset_x
-    local prev_y = prev.y * scale + offset_y
-    local curr_x = curr.x * scale + offset_x
-    local curr_y = curr.y * scale + offset_y
+    local prev_x = prev.x * scale * display_scale + offset_x
+    local prev_y = prev.y * scale * display_scale + offset_y
+    local curr_x = curr.x * scale * display_scale + offset_x
+    local curr_y = curr.y * scale * display_scale + offset_y
     
     -- Fade based on age of the point (newer points are brighter)
     local age_factor = (i - 1) / #points
@@ -205,10 +277,14 @@ function redraw()
     screen.text("Lorenz  a:" .. string.format("%.1f", sigma) .. 
                 " b:" .. string.format("%.1f", rho) .. 
                 " c:" .. string.format("%.1f", beta))
-  else -- rossler
+  elseif current_attractor == "rossler" then -- rossler
     screen.text("Rossler  a:" .. string.format("%.2f", a) .. 
                 " b:" .. string.format("%.2f", b) .. 
                 " c:" .. string.format("%.1f", c))
+  elseif current_attractor == "sprott" then -- sprott
+    screen.text("Sprott-F  a:" .. string.format("%.2f", sprott_a))
+  else -- halvorsen
+    screen.text("Halvorsen  a:" .. string.format("%.2f", halvorsen_a))
   end
   
   -- Display coordinate values
@@ -277,9 +353,15 @@ function enc(n,d)
     if current_attractor == "lorenz" then
       -- Adjust sigma parameter
       sigma = util.clamp(sigma + d*0.1, 0, 20)
-    else -- rossler
+    elseif current_attractor == "rossler" then -- rossler
       -- Adjust a parameter
       a = util.clamp(a + d*0.01, 0, 0.5)
+    elseif current_attractor == "sprott" then -- sprott
+      -- Adjust sprott_a parameter
+      sprott_a = util.clamp(sprott_a + d*0.01, 0.4, 0.5)
+    else -- halvorsen
+      -- Adjust halvorsen_a parameter
+      halvorsen_a = util.clamp(halvorsen_a + d*0.01, 1.65, 3.0)
     end
   elseif n==2 then
     if key2_down then
@@ -289,37 +371,63 @@ function enc(n,d)
       -- Adjust rho/b parameter
       if current_attractor == "lorenz" then
         rho = util.clamp(rho + d*0.1, 0, 60)
-      else -- rossler
+      elseif current_attractor == "rossler" then -- rossler
         b = util.clamp(b + d*0.01, 0, 0.5)
       end
+      -- No second parameter for Sprott-Linz F or Halvorsen
     end
   elseif n==3 then
     if current_attractor == "lorenz" then
       -- Adjust beta parameter
       beta = util.clamp(beta + d*0.05, 0, 10)
-    else -- rossler
+    elseif current_attractor == "rossler" then -- rossler
       -- Adjust c parameter
       c = util.clamp(c + d*0.1, 3, 24)
     end
+    -- No third parameter for Sprott-Linz F or Halvorsen
   end
 end 
 
 function key(n,z)
   if n==1 and z==1 then
-    -- Toggle between Lorenz and Rössler
+    -- Cycle forward between Lorenz, Rössler, Sprott-Linz F, and Halvorsen
     if current_attractor == "lorenz" then
       current_attractor = "rossler"
+    elseif current_attractor == "rossler" then
+      current_attractor = "sprott"
+    elseif current_attractor == "sprott" then
+      current_attractor = "halvorsen"
     else
       current_attractor = "lorenz"
     end
     print("Switched to " .. current_attractor)
-    reset_parameters()
+    reset_parameters(true)
   elseif n==2 then
     key2_down = (z==1)
+    if z==1 and not key2_down then
+      -- Reset parameters when K2 is pressed alone
+      reset_parameters()
+      print("Reset to default parameters")
+    end
   elseif n==3 and z==1 then
-    -- Randomize parameters
-    reset_parameters(true)
-    print("Randomized parameters")
+    if key2_down then
+      -- Cycle backward between attractors when K2+K3 is pressed
+      if current_attractor == "lorenz" then
+        current_attractor = "halvorsen"
+      elseif current_attractor == "rossler" then
+        current_attractor = "lorenz"
+      elseif current_attractor == "sprott" then
+        current_attractor = "rossler"
+      else
+        current_attractor = "sprott"
+      end
+      print("Switched to " .. current_attractor)
+      reset_parameters(true)
+    else
+      -- Randomize parameters when K3 is pressed alone
+      reset_parameters(true)
+      print("Randomized parameters")
+    end
   end
 end
 
