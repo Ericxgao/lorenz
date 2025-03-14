@@ -5,12 +5,12 @@
 -- E2 adjust rho/b
 -- E3 adjust beta/c
 --
+-- K1+E1 adjust simulation speed (dt)
 -- K2+K3 cycle between 
 -- Lorenz, Rössler, 
 -- Sprott-Linz F, and 
 -- Halvorsen attractors
 --
--- K2+E2 adjust simulation speed (dt)
 -- K2+E3 adjust selected output attenuation (0-100%)
 -- K2 switch selected output
 -- K3 randomize parameters
@@ -48,6 +48,7 @@ local points = {}
 local max_points = 300  -- Increased for longer trails
 local offset_x, offset_y = 64, 32  -- Center of the screen
 local lorentz_metro
+local key1_down = false
 local key2_down = false
 local current_attractor = "lorenz"  -- Can be "lorenz", "rossler", "sprott", or "halvorsen"
 local out1_volts, out2_volts, out3_volts, out4_volts = 0, 0, 0, 0
@@ -392,23 +393,27 @@ end
 
 function enc(n,d)
   if n==1 then
-    if current_attractor == "lorenz" then
-      -- Adjust sigma parameter
-      sigma = util.clamp(sigma + d*0.1, 0, 20)
-    elseif current_attractor == "rossler" then -- rossler
-      -- Adjust a parameter
-      a = util.clamp(a + d*0.01, 0, 0.5)
-    elseif current_attractor == "sprott" then -- sprott
-      -- Adjust sprott_a parameter
-      sprott_a = util.clamp(sprott_a + d*0.01, 0.4, 0.5)
-    else -- halvorsen
-      -- Adjust halvorsen_a parameter
-      halvorsen_a = util.clamp(halvorsen_a + d*0.01, 1.65, 3.0)
+    if key1_down then
+      -- Adjust dt when K1 is held
+      dt = util.clamp(dt + d*0.001, dt_min, dt_max)
+    else
+      if current_attractor == "lorenz" then
+        -- Adjust sigma parameter
+        sigma = util.clamp(sigma + d*0.1, 0, 20)
+      elseif current_attractor == "rossler" then -- rossler
+        -- Adjust a parameter
+        a = util.clamp(a + d*0.01, 0, 0.5)
+      elseif current_attractor == "sprott" then -- sprott
+        -- Adjust sprott_a parameter
+        sprott_a = util.clamp(sprott_a + d*0.01, 0.4, 0.5)
+      else -- halvorsen
+        -- Adjust halvorsen_a parameter
+        halvorsen_a = util.clamp(halvorsen_a + d*0.01, 1.65, 3.0)
+      end
     end
   elseif n==2 then
     if key2_down then
-      -- Adjust dt when K2 is held
-      dt = util.clamp(dt + d*0.001, dt_min, dt_max)
+      -- No longer adjusting dt with K2+E2
       encoder_adjusted_during_k2 = true
     else
       -- Adjust rho/b parameter
@@ -438,7 +443,9 @@ function enc(n,d)
 end 
 
 function key(n,z)
-  if n==2 then
+  if n==1 then
+    key1_down = (z==1)
+  elseif n==2 then
     if z==1 then
       -- K2 pressed down
       key2_down = true
