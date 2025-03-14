@@ -1,19 +1,25 @@
--- lorentz: crow study with chaotic attractor visualization
+-- lorenz: crow study with 
+-- chaotic attractor visualization
 -- 
--- E1 adjust first parameter (sigma/a)
--- E2 adjust second parameter (rho/b)
--- E3 adjust third parameter (beta/c)
+-- E1 adjust sigma/a
+-- E2 adjust rho/b
+-- E3 adjust beta/c
 --
--- K2+K3 cycle between Lorenz, Rössler, Sprott-Linz F, and Halvorsen attractors
+-- K2+K3 cycle between 
+-- Lorenz, Rössler, 
+-- Sprott-Linz F, and 
+-- Halvorsen attractors
+--
 -- K2+E2 adjust simulation speed (dt)
--- K2+E3 adjust output attenuation (0-100%)
+-- K2+E3 adjust selected output attenuation (0-100%)
 -- K2 switch selected output
 -- K3 randomize parameters
 --
--- OUT1: x coordinate (scaled -5V to 5V)
--- OUT2: y coordinate (scaled -5V to 5V)
--- OUT3: z coordinate (scaled -5V to 5V)
--- OUT4: derived parameter (scaled 0V to 5V)
+-- OUT1: x coordinate (-5V to 5V)
+-- OUT2: y coordinate (-5V to 5V)
+-- OUT3: z coordinate (-5V to 5V)
+-- OUT4: distance from origin
+-- (0V to 5V)
 
 local x, y, z = 0.1, 0, 0
 local dt = 0.005  -- Smaller time step for smoother simulation
