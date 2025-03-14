@@ -4,10 +4,10 @@
 -- E2 adjust second parameter (rho/b)
 -- E3 adjust third parameter (beta/c)
 --
--- K1 cycle forward between Lorenz, Rössler, Sprott-Linz F, and Halvorsen attractors
--- K2+K3 cycle backward between attractors
+-- K2+K3 cycle between Lorenz, Rössler, Sprott-Linz F, and Halvorsen attractors
 -- K2+E2 adjust simulation speed (dt)
--- K2 reset to default parameters
+-- K2+E3 adjust output attenuation (0-100%)
+-- K2 switch selected output
 -- K3 randomize parameters
 --
 -- OUT1: x coordinate (scaled -5V to 5V)
@@ -45,6 +45,11 @@ local lorentz_metro
 local key2_down = false
 local current_attractor = "lorenz"  -- Can be "lorenz", "rossler", "sprott", or "halvorsen"
 local out1_volts, out2_volts, out3_volts, out4_volts = 0, 0, 0, 0
+local selected_output = 1  -- Track which output is currently selected
+local output_attenuation = {1.0, 1.0, 1.0, 1.0}  -- Attenuation for each output (0.0-1.0)
+local encoder_adjusted_during_k2 = false  -- Track if encoder was adjusted while K2 was held
+local att_display_fade = 0  -- Fade timer for attenuation display (0-1)
+local att_fade_metro  -- Metro for fading out attenuation display
 
 function init()
   -- Initialize crow outputs for direct voltage control
@@ -66,6 +71,18 @@ function init()
     redraw()
   end
   lorentz_metro:start()
+  
+  -- Initialize attenuation fade metro
+  att_fade_metro = metro.init()
+  att_fade_metro.time = 1/60  -- 20 fps for smooth fade
+  att_fade_metro.event = function()
+    if att_display_fade > 0 then
+      att_display_fade = math.max(0, att_display_fade - 1/60)  -- Fade over ~3 seconds (0.016 * 20fps * 3s = ~1)
+      if att_display_fade == 0 then
+        att_fade_metro:stop()
+      end
+    end
+  end
   
   -- Initialize with default values
   reset_parameters()
@@ -190,7 +207,7 @@ function update_attractor()
   if (math.abs(x) == 1000 or math.abs(y) == 1000 or math.abs(z) == 1000) then
     reset_parameters(true)
   end
-  
+
   -- Add new point to the list
   table.insert(points, {x = x, y = y, z = z})
   
@@ -202,29 +219,29 @@ function update_attractor()
   -- Update crow outputs with scaled values
   if current_attractor == "lorenz" then
     -- Lorenz typically has larger values
-    out1_volts = util.clamp(x * 0.1, -5, 5)
-    out2_volts = util.clamp(y * 0.1, -5, 5)
-    out3_volts = util.clamp(z * 0.1, -5, 5)  -- Z is much larger in Lorenz
+    out1_volts = util.clamp(x * 0.1, -5, 5) * output_attenuation[1]
+    out2_volts = util.clamp(y * 0.1, -5, 5) * output_attenuation[2]
+    out3_volts = util.clamp(z * 0.1, -5, 5) * output_attenuation[3]  -- Z is much larger in Lorenz
     -- Calculate distance from origin (normalized chaos intensity)
-    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.05, 0, 5)
+    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.05, 0, 5) * output_attenuation[4]
   elseif current_attractor == "rossler" then
     -- Rössler has different ranges for each dimension
-    out1_volts = util.clamp(x * 0.25, -5, 5)
-    out2_volts = util.clamp(y * 0.25, -5, 5)
-    out3_volts = util.clamp(z * 0.25, -5, 5)  -- Z is still larger but not as extreme
-    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.1, 0, 5)
+    out1_volts = util.clamp(x * 0.25, -5, 5) * output_attenuation[1]
+    out2_volts = util.clamp(y * 0.25, -5, 5) * output_attenuation[2]
+    out3_volts = util.clamp(z * 0.25, -5, 5) * output_attenuation[3]  -- Z is still larger but not as extreme
+    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.1, 0, 5) * output_attenuation[4]
   elseif current_attractor == "sprott" then -- sprott
     -- Sprott-Linz F has smaller ranges
-    out1_volts = util.clamp(x * 1.0, -5, 5)
-    out2_volts = util.clamp(y * 1.0, -5, 5)
-    out3_volts = util.clamp(z * 1.0, -5, 5)
-    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.5, 0, 5)
+    out1_volts = util.clamp(x * 1.0, -5, 5) * output_attenuation[1]
+    out2_volts = util.clamp(y * 1.0, -5, 5) * output_attenuation[2]
+    out3_volts = util.clamp(z * 1.0, -5, 5) * output_attenuation[3]
+    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.5, 0, 5) * output_attenuation[4]
   else -- halvorsen
     -- Halvorsen has moderate ranges
-    out1_volts = util.clamp(x * 0.5, -5, 5)
-    out2_volts = util.clamp(y * 0.5, -5, 5)
-    out3_volts = util.clamp(z * 0.5, -5, 5)
-    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.25, 0, 5)
+    out1_volts = util.clamp(x * 0.5, -5, 5) * output_attenuation[1]
+    out2_volts = util.clamp(y * 0.5, -5, 5) * output_attenuation[2]
+    out3_volts = util.clamp(z * 0.5, -5, 5) * output_attenuation[3]
+    out4_volts = util.clamp(math.sqrt(x*x + y*y + z*z) * 0.25, 0, 5) * output_attenuation[4]
   end
   
   crow.output[1].volts = out1_volts
@@ -268,10 +285,10 @@ function redraw()
   
   -- Draw attractor name and parameters in title bar
   screen.level(15)
-  screen.rect(0, 0, 128, 12)
+  screen.rect(0, 0, 128, 7)
   screen.fill()
   screen.level(0)
-  screen.move(2, 8)
+  screen.move(2, 6)
   
   if current_attractor == "lorenz" then
     screen.text("Lorenz  a:" .. string.format("%.1f", sigma) .. 
@@ -307,19 +324,14 @@ function draw_output_visualizers()
   
   -- Draw output visualizers
   local outputs = {
-    {value = out1_volts, name = "1"},
-    {value = out2_volts, name = "2"},
-    {value = out3_volts, name = "3"},
-    {value = out4_volts, name = "4"}
+    {value = out1_volts, name = "1", att = output_attenuation[1]},
+    {value = out2_volts, name = "2", att = output_attenuation[2]},
+    {value = out3_volts, name = "3", att = output_attenuation[3]},
+    {value = out4_volts, name = "4", att = output_attenuation[4]}
   }
   
   for i, output in ipairs(outputs) do
     local y_pos = viz_y_start + (i-1) * viz_spacing
-    
-    -- Draw label
-    screen.level(5)
-    screen.move(viz_x - 5, y_pos + 3)
-    screen.text(output.name)
     
     -- Draw bipolar meter background
     screen.level(1)
@@ -345,6 +357,30 @@ function draw_output_visualizers()
       screen.rect(viz_x + viz_width/2 - bar_width, y_pos, bar_width, viz_height)
     end
     screen.fill()
+    
+    -- Draw selection border if this output is selected
+    screen.level(i == selected_output and 15 or 0)
+    screen.rect(viz_x, y_pos, viz_width + 1, viz_height + 1)
+    screen.stroke()
+    
+    -- Draw attenuation indicator
+    local att_percent = math.floor(output.att * 100)
+    
+    -- Only show percentage when K2 is held or during fade-out
+    if key2_down or att_display_fade > 0 then
+      -- Calculate brightness based on fade timer
+      local brightness = key2_down and 15 or math.floor(15 * att_display_fade)
+      screen.level(i == selected_output and brightness or math.floor(brightness * 0.5))
+      screen.move(viz_x - 20, y_pos + 5)
+      screen.text(att_percent .. "%")
+    else
+      -- Show dots for non-selected outputs when not displaying percentages
+      if i ~= selected_output then
+        screen.level(3)
+        screen.move(viz_x - 20, y_pos + 5)
+        screen.text(string.rep("·", math.ceil(output.att * 5)))
+      end
+    end
   end
 end
 
@@ -367,6 +403,7 @@ function enc(n,d)
     if key2_down then
       -- Adjust dt when K2 is held
       dt = util.clamp(dt + d*0.001, dt_min, dt_max)
+      encoder_adjusted_during_k2 = true
     else
       -- Adjust rho/b parameter
       if current_attractor == "lorenz" then
@@ -377,52 +414,56 @@ function enc(n,d)
       -- No second parameter for Sprott-Linz F or Halvorsen
     end
   elseif n==3 then
-    if current_attractor == "lorenz" then
-      -- Adjust beta parameter
-      beta = util.clamp(beta + d*0.05, 0, 10)
-    elseif current_attractor == "rossler" then -- rossler
-      -- Adjust c parameter
-      c = util.clamp(c + d*0.1, 3, 24)
+    if key2_down then
+      -- Adjust attenuation for selected output when K2 is held
+      output_attenuation[selected_output] = util.clamp(output_attenuation[selected_output] + d*0.01, 0.0, 1.0)
+      encoder_adjusted_during_k2 = true
+    else
+      if current_attractor == "lorenz" then
+        -- Adjust beta parameter
+        beta = util.clamp(beta + d*0.05, 0, 10)
+      elseif current_attractor == "rossler" then -- rossler
+        -- Adjust c parameter
+        c = util.clamp(c + d*0.1, 3, 24)
+      end
+      -- No third parameter for Sprott-Linz F or Halvorsen
     end
-    -- No third parameter for Sprott-Linz F or Halvorsen
   end
 end 
 
 function key(n,z)
-  if n==1 and z==1 then
-    -- Cycle forward between Lorenz, Rössler, Sprott-Linz F, and Halvorsen
-    if current_attractor == "lorenz" then
-      current_attractor = "rossler"
-    elseif current_attractor == "rossler" then
-      current_attractor = "sprott"
-    elseif current_attractor == "sprott" then
-      current_attractor = "halvorsen"
+  if n==2 then
+    if z==1 then
+      -- K2 pressed down
+      key2_down = true
+      encoder_adjusted_during_k2 = false
+      att_display_fade = 1  -- Show attenuation display
+      att_fade_metro:stop()  -- Stop any ongoing fade
     else
-      current_attractor = "lorenz"
-    end
-    print("Switched to " .. current_attractor)
-    reset_parameters(true)
-  elseif n==2 then
-    key2_down = (z==1)
-    if z==1 and not key2_down then
-      -- Reset parameters when K2 is pressed alone
-      reset_parameters()
-      print("Reset to default parameters")
+      -- K2 released
+      if key2_down and not encoder_adjusted_during_k2 then
+        -- Switch selected output only on K2 release and if no encoder was adjusted
+        selected_output = (selected_output % 4) + 1
+      end
+      key2_down = false
+      att_display_fade = 1  -- Start fade from full brightness
+      att_fade_metro:start()  -- Start fade-out timer
     end
   elseif n==3 and z==1 then
     if key2_down then
-      -- Cycle backward between attractors when K2+K3 is pressed
+      -- Cycle between attractors when K2+K3 is pressed
       if current_attractor == "lorenz" then
-        current_attractor = "halvorsen"
-      elseif current_attractor == "rossler" then
-        current_attractor = "lorenz"
-      elseif current_attractor == "sprott" then
         current_attractor = "rossler"
-      else
+      elseif current_attractor == "rossler" then
         current_attractor = "sprott"
+      elseif current_attractor == "sprott" then
+        current_attractor = "halvorsen"
+      else
+        current_attractor = "lorenz"
       end
       print("Switched to " .. current_attractor)
       reset_parameters(true)
+      encoder_adjusted_during_k2 = true  -- Prevent output selection change
     else
       -- Randomize parameters when K3 is pressed alone
       reset_parameters(true)
@@ -432,6 +473,7 @@ function key(n,z)
 end
 
 function cleanup()
-  -- Stop the metro when the script is cleaned up
+  -- Stop the metros when the script is cleaned up
   lorentz_metro:stop()
+  att_fade_metro:stop()
 end
