@@ -23,8 +23,8 @@
 
 local x, y, z = 0.1, 0, 0
 local dt = 0.005  -- Smaller time step for smoother simulation
-local dt_min = 0.001
-local dt_max = 0.2
+local dt_min = 0.00001
+local dt_max = 0.15
 
 -- Lorenz parameters
 local sigma = 10
@@ -395,7 +395,7 @@ function enc(n,d)
   if n==1 then
     if key1_down then
       -- Adjust dt when K1 is held
-      dt = util.clamp(dt + d*0.001, dt_min, dt_max)
+      dt = util.clamp(dt + d * 0.0001, dt_min, dt_max)
     else
       if current_attractor == "lorenz" then
         -- Adjust sigma parameter
