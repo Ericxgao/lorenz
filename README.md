@@ -20,6 +20,9 @@ A crow study implementing chaotic attractor CV outputs and visualization.
 - **K2**: Switch selected output
 - **K3**: Randomize parameters
 
+### Parameters
+- **slew**: Crow slew time
+
 ## Outputs
 - **OUT1**: x coordinate (-5V to 5V)
 - **OUT2**: y coordinate (-5V to 5V)

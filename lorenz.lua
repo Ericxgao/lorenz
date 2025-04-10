@@ -59,11 +59,17 @@ local att_display_fade = 0  -- Fade timer for attenuation display (0-1)
 local att_fade_metro  -- Metro for fading out attenuation display
 
 function init()
+	-- Define paremeters
+  params:add_taper('slew', "slew", 0.001, 0.1, 0.001, 1, "s")
+  params:set_action('slew', function(v)
+											 for i=1,4 do crow.output[i].slew = v end
+  end)
+
   -- Initialize crow outputs for direct voltage control
-  crow.output[1].slew = 0.001  -- Small slew for smooth transitions
-  crow.output[2].slew = 0.001
-  crow.output[3].slew = 0.001  -- Add slew for z coordinate
-  crow.output[4].slew = 0.001  -- Add slew for out4
+  crow.output[1].slew = params:get('slew')  -- Small slew for smooth transitions
+  crow.output[2].slew = params:get('slew')
+  crow.output[3].slew = params:get('slew')  -- Add slew for z coordinate
+  crow.output[4].slew = params:get('slew')  -- Add slew for out4
   
   -- Initialize screen
   screen.level(15)
