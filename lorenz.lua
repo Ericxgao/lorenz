@@ -18,10 +18,16 @@
 -- OUT1: x coordinate (-5V to 5V)
 -- OUT2: y coordinate (-5V to 5V)
 -- OUT3: z coordinate (-5V to 5V)
--- OUT4: distance from origin
--- (0V to 5V)
+-- OUT4: distance from origin (0V to 5V)
+--
+-- Second crow (crow.ii) outputs:
+-- OUT1: inverted x coordinate (5V to -5V)
+-- OUT2: inverted y coordinate (5V to -5V)
+-- OUT3: inverted z coordinate (5V to -5V)
+-- OUT4: inverted distance (0V to -5V)
 
 local x, y, z = 0.1, 0, 0
+local initial_x, initial_y, initial_z = 0.1, 0, 0  -- Store initial conditions for reset
 local dt = 0.005  -- Smaller time step for smoother simulation
 local dt_min = 0.00001
 local dt_max = 0.15
@@ -58,6 +64,25 @@ local encoder_adjusted_during_k2 = false  -- Track if encoder was adjusted while
 local att_display_fade = 0  -- Fade timer for attenuation display (0-1)
 local att_fade_metro  -- Metro for fading out attenuation display
 
+-- Crow input values (continuously updated)
+local crow1_input1 = 0  -- Store first crow input 1 value
+local crow2_input1 = 0  -- Store second crow input 1 value
+local crow2_input2 = 0  -- Store second crow input 2 value
+
+-- Noise filtering for inputs
+local filtered_inputs = {0, 0, 0}  -- Previous filtered values
+local noise_threshold = 0.02  -- Deadband threshold (20mV)
+
+-- Base parameter values (before offset)
+local base_sigma = 10
+local base_rho = 28
+local base_beta = 8/3
+local base_a = 0.2
+local base_b = 0.2
+local base_c = 5.7
+local base_sprott_a = 0.5
+local base_halvorsen_a = 1.89
+
 function init()
 	-- Define paremeters
   params:add_taper('slew', "slew", 0.001, 0.1, 0.001, 1, "s")
@@ -71,6 +96,12 @@ function init()
   crow.output[3].slew = params:get('slew')  -- Add slew for z coordinate
   crow.output[4].slew = params:get('slew')  -- Add slew for out4
   
+  -- Initialize second crow (crow.ii) outputs for inverted signals
+  crow.ii.crow[2].slew(1, 0.001)
+  crow.ii.crow[2].slew(2, 0.001)
+  crow.ii.crow[2].slew(3, 0.001)
+  crow.ii.crow[2].slew(4, 0.001)
+
   -- Initialize screen
   screen.level(15)
   screen.aa(0)
@@ -99,80 +130,185 @@ function init()
   
   -- Initialize with default values
   reset_parameters()
+  
+  -- Set up input 1 for parameter offset control
+  crow.input[1].stream = function(volts)
+    crow1_input1 = volts
+  end
+  crow.input[1].mode("stream", 0.01)  -- Update every 10ms
+  
+  -- Set up input 2 as reset button
+  crow.input[2].change = function()
+    reset_coordinates()
+  end
+  crow.input[2].mode("change", 2.0, 0.25, "rising")
+
+  crow.ii.crow[2].event = function(e, value)
+    if e.name == 'input' then
+      if e.arg == 1 then
+        crow2_input1 = value
+      elseif e.arg == 2 then
+        crow2_input2 = value
+      end
+    end
+  end
 end
 
 function reset_parameters(randomize)
   if current_attractor == "lorenz" then
     if randomize then
-      sigma = math.random() * 49.9 + 0.1  -- 0.1 to 50
-      rho = math.random() * 59.5 + 0.5    -- 0.5 to 60
-      beta = math.random() * 9.9 + 0.1    -- 0.1 to 10
+      base_sigma = math.random() * 49.9 + 0.1  -- 0.1 to 50
+      base_rho = math.random() * 59.5 + 0.5    -- 0.5 to 60
+      base_beta = math.random() * 9.9 + 0.1    -- 0.1 to 10
       
       -- Also randomize initial conditions
       x = math.random() * 20 - 10         -- -10 to 10
       y = math.random() * 20 - 10         -- -10 to 10
       z = math.random() * 10              -- 0 to 10
+      initial_x, initial_y, initial_z = x, y, z
     else
-      sigma = 10
-      rho = 28
-      beta = 8/3
+      base_sigma = 10
+      base_rho = 28
+      base_beta = 8/3
       x, y, z = 0.1, 0, 0
+      initial_x, initial_y, initial_z = x, y, z
+      dt = 0.005
     end
-	dt = 0.005
     display_scale = 1  -- Set display scale for Lorenz
   elseif current_attractor == "rossler" then -- rossler
     if randomize then
-      a = math.random(10, 40) / 100
-      b = math.random(10, 40) / 100
-      c = math.random(40, 80) / 10
+      base_a = math.random(10, 40) / 100
+      base_b = math.random(10, 40) / 100
+      base_c = math.random(40, 80) / 10
 
 	  -- Also randomize initial conditions
       x = math.random() * 20 - 10         -- -10 to 10
       y = math.random() * 20 - 10         -- -10 to 10
       z = math.random() * 10              -- 0 to 10
+      initial_x, initial_y, initial_z = x, y, z
     else
-      a = 0.1
-      b = 0.1
-      c = 14
-
-	  x, y, z = 0.1, 0.1, 0.1
+      base_a = 0.1
+      base_b = 0.1
+      base_c = 14
+      x, y, z = 0.1, 0.1, 0.1
+      initial_x, initial_y, initial_z = x, y, z
+      dt = 0.05
     end
-	dt = 0.05
     display_scale = 1  -- Set display scale for Rössler
   elseif current_attractor == "sprott" then -- sprott
     if randomize then
-      sprott_a = math.random(40, 50) / 100  -- 0.4 to 0.5
+      base_sprott_a = math.random(40, 50) / 100  -- 0.4 to 0.5
       
       -- Also randomize initial conditions
       x = math.random(50) * 0.01         -- 0 to 0.5
       y = math.random(-25, 25) * 0.01         -- -0.25 to 0.25
       z = math.random(-25, 25) * 0.01         -- -0.25 to 0.25
+      initial_x, initial_y, initial_z = x, y, z
     else
-      sprott_a = 0.5
+      base_sprott_a = 0.5
       x, y, z = 1, 0, 0
+      initial_x, initial_y, initial_z = x, y, z
+      dt = 0.05
     end
-    dt = 0.05
     display_scale = 5.5  -- Set display scale for Sprott
   else -- halvorsen
     if randomize then
-      halvorsen_a = math.random(165, 300) / 100  -- 1.65 to 3.0
+      base_halvorsen_a = math.random(165, 300) / 100  -- 1.65 to 3.0
       
       -- Also randomize initial conditions
       x = math.random(-1000, 1000) * 0.01     -- -10 to 10
       y = math.random(-1000, 1000) * 0.01     -- -10 to 10
       z = math.random(-1000, 1000) * 0.01     -- -10 to 10
+      initial_x, initial_y, initial_z = x, y, z
     else
-      halvorsen_a = 1.89
+      base_halvorsen_a = 1.89
       x, y, z = 0.1, 0, 0
+      initial_x, initial_y, initial_z = x, y, z
+      dt = 0.01
     end
-    dt = 0.01
     display_scale = 3.0  -- Set display scale for Halvorsen
   end
   
   points = {}
 end
 
+function apply_parameter_offsets()
+  -- Map input voltages (-5V to +5V) to parameter offsets
+  -- crow1_input1 controls first parameter (a, sigma)
+  -- crow2_input1 controls second parameter (b, rho) 
+  -- crow2_input2 controls third parameter (c, beta)
+  
+  -- Apply noise filtering to inputs
+  crow1_input1 = filter_input_noise(crow1_input1, 1)
+  crow2_input1 = filter_input_noise(crow2_input1, 2)
+  crow2_input2 = filter_input_noise(crow2_input2, 3)
+  
+  if current_attractor == "lorenz" then
+    -- Lorenz parameter ranges: sigma(0-20), rho(0-60), beta(0-10)
+    local sigma_offset = util.linlin(-5, 5, -10, 10, util.clamp(crow1_input1, -5, 5))
+    local rho_offset = util.linlin(-5, 5, -30, 30, util.clamp(crow2_input1, -5, 5))
+    local beta_offset = util.linlin(-5, 5, -5, 5, util.clamp(crow2_input2, -5, 5))
+    
+    sigma = util.clamp(base_sigma + sigma_offset, 0, 20)
+    rho = util.clamp(base_rho + rho_offset, 0, 60)
+    beta = util.clamp(base_beta + beta_offset, 0, 10)
+    
+  elseif current_attractor == "rossler" then
+    -- Rössler parameter ranges: a(0-0.5), b(0-0.5), c(3-24)
+    local a_offset = util.linlin(-5, 5, -0.25, 0.25, util.clamp(crow1_input1, -5, 5))
+    local b_offset = util.linlin(-5, 5, -0.25, 0.25, util.clamp(crow2_input1, -5, 5))
+    local c_offset = util.linlin(-5, 5, -10.5, 10.5, util.clamp(crow2_input2, -5, 5))
+    
+    a = util.clamp(base_a + a_offset, 0, 0.5)
+    b = util.clamp(base_b + b_offset, 0, 0.5)
+    c = util.clamp(base_c + c_offset, 3, 24)
+    
+  elseif current_attractor == "sprott" then
+    -- Sprott parameter range: sprott_a(0.4-0.5)
+    local sprott_a_offset = util.linlin(-5, 5, -0.05, 0.05, util.clamp(crow1_input1, -5, 5))
+    
+    sprott_a = util.clamp(base_sprott_a + sprott_a_offset, 0.4, 0.5)
+    
+  else -- halvorsen
+    -- Halvorsen parameter range: halvorsen_a(1.65-3.0)
+    local halvorsen_a_offset = util.linlin(-5, 5, -0.675, 0.675, util.clamp(crow1_input1, -5, 5))
+    
+    halvorsen_a = util.clamp(base_halvorsen_a + halvorsen_a_offset, 1.65, 3.0)
+  end
+end
+
+function filter_input_noise(current_value, input_id)
+  -- Deadband filtering: ignore changes smaller than noise threshold
+  local previous_value = filtered_inputs[input_id]
+  local change = math.abs(current_value - previous_value)
+  
+  local filtered_value
+  if change < noise_threshold then
+    -- Change is too small, keep previous value (deadband only)
+    filtered_value = previous_value
+  else
+    -- Change is significant, use new value immediately (no slew)
+    filtered_value = current_value
+  end
+  
+  -- Store the filtered value for next time
+  filtered_inputs[input_id] = filtered_value
+  
+  return filtered_value
+end
+
+function reset_coordinates()
+  -- Reset coordinates to stored initial conditions
+  x, y, z = initial_x, initial_y, initial_z
+  
+  -- Clear the trail
+  points = {}
+end
+
 function update_attractor()
+  -- Apply parameter offsets based on crow input values
+  apply_parameter_offsets()
+  
   if current_attractor == "lorenz" then
     -- Calculate next point in the Lorenz system
     local dx = sigma * (y - x)
@@ -261,11 +397,24 @@ function update_attractor()
   crow.output[2].volts = out2_volts
   crow.output[3].volts = out3_volts
   crow.output[4].volts = out4_volts
+  
+  -- Send inverted versions to second crow
+  crow.ii.crow[2].volts(1, -out1_volts)
+  crow.ii.crow[2].volts(2, -out2_volts) 
+  crow.ii.crow[2].volts(3, -out3_volts)
+  crow.ii.crow[2].volts(4, -out4_volts)
+
+  crow.ii.crow[2].get('input', 1)
+  crow.ii.crow[2].get('input', 2)
 end
 
 function redraw()
-  screen.clear()
+  -- Read from follower crow's inputs (if needed)
+  -- This triggers the follower to update its outputs 3&4 with input values
+  -- You can read the values from the follower's outputs if needed
   
+  screen.clear()
+
   -- Draw the attractor
   for i = 2, #points do
     local prev = points[i-1]
@@ -304,9 +453,9 @@ function redraw()
   screen.move(2, 6)
   
   if current_attractor == "lorenz" then
-    screen.text("Lorenz  a:" .. string.format("%.1f", sigma) .. 
-                " b:" .. string.format("%.1f", rho) .. 
-                " c:" .. string.format("%.1f", beta))
+    screen.text("Lorenz  σ:" .. string.format("%.1f", sigma) .. 
+                " ρ:" .. string.format("%.1f", rho) .. 
+                " β:" .. string.format("%.1f", beta))
   elseif current_attractor == "rossler" then -- rossler
     screen.text("Rossler  a:" .. string.format("%.2f", a) .. 
                 " b:" .. string.format("%.2f", b) .. 
@@ -404,17 +553,17 @@ function enc(n,d)
       dt = util.clamp(dt + d * 0.0001, dt_min, dt_max)
     else
       if current_attractor == "lorenz" then
-        -- Adjust sigma parameter
-        sigma = util.clamp(sigma + d*0.1, 0, 20)
+        -- Adjust base sigma parameter
+        base_sigma = util.clamp(base_sigma + d*0.1, 0, 20)
       elseif current_attractor == "rossler" then -- rossler
-        -- Adjust a parameter
-        a = util.clamp(a + d*0.01, 0, 0.5)
+        -- Adjust base a parameter
+        base_a = util.clamp(base_a + d*0.01, 0, 0.5)
       elseif current_attractor == "sprott" then -- sprott
-        -- Adjust sprott_a parameter
-        sprott_a = util.clamp(sprott_a + d*0.01, 0.4, 0.5)
+        -- Adjust base sprott_a parameter
+        base_sprott_a = util.clamp(base_sprott_a + d*0.01, 0.4, 0.5)
       else -- halvorsen
-        -- Adjust halvorsen_a parameter
-        halvorsen_a = util.clamp(halvorsen_a + d*0.01, 1.65, 3.0)
+        -- Adjust base halvorsen_a parameter
+        base_halvorsen_a = util.clamp(base_halvorsen_a + d*0.01, 1.65, 3.0)
       end
     end
   elseif n==2 then
@@ -422,11 +571,11 @@ function enc(n,d)
       -- No longer adjusting dt with K2+E2
       encoder_adjusted_during_k2 = true
     else
-      -- Adjust rho/b parameter
+      -- Adjust base rho/b parameter
       if current_attractor == "lorenz" then
-        rho = util.clamp(rho + d*0.1, 0, 60)
+        base_rho = util.clamp(base_rho + d*0.1, 0, 60)
       elseif current_attractor == "rossler" then -- rossler
-        b = util.clamp(b + d*0.01, 0, 0.5)
+        base_b = util.clamp(base_b + d*0.01, 0, 0.5)
       end
       -- No second parameter for Sprott-Linz F or Halvorsen
     end
@@ -437,11 +586,11 @@ function enc(n,d)
       encoder_adjusted_during_k2 = true
     else
       if current_attractor == "lorenz" then
-        -- Adjust beta parameter
-        beta = util.clamp(beta + d*0.05, 0, 10)
+        -- Adjust base beta parameter
+        base_beta = util.clamp(base_beta + d*0.05, 0, 10)
       elseif current_attractor == "rossler" then -- rossler
-        -- Adjust c parameter
-        c = util.clamp(c + d*0.1, 3, 24)
+        -- Adjust base c parameter
+        base_c = util.clamp(base_c + d*0.1, 3, 24)
       end
       -- No third parameter for Sprott-Linz F or Halvorsen
     end
