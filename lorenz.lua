@@ -51,7 +51,7 @@ local halvorsen_a = 1.89
 local scale = 1  -- Scale factor for visualization
 local display_scale = 1  -- Display scale that changes per attractor
 local points = {}
-local max_points = 300  -- Increased for longer trails
+local max_points = 120  -- Increased for longer trails
 local offset_x, offset_y = 64, 32  -- Center of the screen
 local lorentz_metro
 local key1_down = false
@@ -111,15 +111,8 @@ function init()
   lorentz_metro = metro.init()
   lorentz_metro.time = 1/60 -- 60 fps (faster update rate)
   lorentz_metro.event = function()
-    update_attractor()
     redraw()
-  end
-  lorentz_metro:start()
-  
-  -- Initialize attenuation fade metro
-  att_fade_metro = metro.init()
-  att_fade_metro.time = 1/60  -- 20 fps for smooth fade
-  att_fade_metro.event = function()
+
     if att_display_fade > 0 then
       att_display_fade = math.max(0, att_display_fade - 1/60)  -- Fade over ~3 seconds (0.016 * 20fps * 3s = ~1)
       if att_display_fade == 0 then
@@ -127,6 +120,15 @@ function init()
       end
     end
   end
+  lorentz_metro:start()
+
+  -- Start attractor calculation in main runloop
+  clock.run(function()
+    while true do
+      update_attractor()
+      clock.sleep(1/120)
+    end
+  end)
   
   -- Initialize with default values
   reset_parameters()
